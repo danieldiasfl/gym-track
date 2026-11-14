@@ -15,6 +15,8 @@ export const api={
  createExercise:(v:Omit<Exercise,'position'> & {workoutId:string})=>post('/api/exercises',v),
  updateExercise:(id:string,v:Omit<Exercise,'id'|'position'>)=>req(`/api/exercises/${id}`,{method:'PATCH',body:JSON.stringify(v)}),
  deleteExercise:(id:string)=>req(`/api/exercises/${id}`,{method:'DELETE'}),
+ createStretch:(v:{id:string;workoutId:string;name:string;phase:'before'|'after'})=>post('/api/stretches',v),
+ deleteStretch:(id:string)=>req(`/api/stretches/${id}`,{method:'DELETE'}),
  reorder:(kind:'workouts'|'exercises',parentId:string,ids:string[])=>post('/api/reorder',{kind,parentId,ids}),
  log:(v:{id:string;userId:string;workoutId:string;exerciseId:string;date:string;reps:string;load:number;effort:Difficulty;notes:string})=>post('/api/logs',v),
 };
