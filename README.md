@@ -1,6 +1,6 @@
 # FitTrack — protótipo de acompanhamento de treinos
 
-Aplicação web responsiva para organizar treinos, exercícios e histórico. Esta versão é um protótipo frontend: não usa backend nem banco de dados. Os dados são salvos no `localStorage` do navegador.
+Aplicação web responsiva para organizar treinos, exercícios e histórico. A interface fala com Pages Functions em `/api`, e essas funções leem e gravam no Cloudflare D1.
 
 ## Requisitos
 
@@ -28,14 +28,14 @@ Para parar o servidor, volte ao terminal e pressione `Ctrl + C`.
 
 ## 2. Como testar a aplicação
 
-- Na tela inicial, escolha Alex ou Marina, ou crie um perfil.
+- Na tela inicial, crie um perfil ou escolha um que já esteja no banco.
 - Dentro do perfil, crie, edite e exclua treinos.
 - Abra um treino para gerenciar exercícios.
 - Adicione exercícios e configure séries/repetições, carga, notas e dificuldade.
 - Clique em **Iniciar treino**, ajuste os valores efetivamente realizados e finalize.
 - Abra **Histórico** para consultar as sessões salvas.
 
-Os dados ficam no armazenamento local do navegador. Eles não são sincronizados entre computadores, navegadores ou usuários. Para voltar aos dados de demonstração originais, abra as ferramentas do navegador → Application/Armazenamento → Local Storage → seu endereço local → apague a chave `fittrack-data`.
+Os dados vêm do D1. No `npm run dev` puro a API não existe; use `npm run dev:cf` para subir o Vite junto com as Pages Functions. Antes disso, aplique o schema e deixe o binding `DB` apontando para o seu banco (veja a seção 3).
 
 ## 3. Publicar gratuitamente no Cloudflare Pages
 
@@ -83,7 +83,21 @@ Se o Git pedir autenticação, siga a janela de login do navegador. Caso `git` n
 7. Clique em **Save and Deploy**.
 8. Aguarde o build terminar. O Cloudflare mostrará um endereço semelhante a `https://fittrack.pages.dev`.
 
-Não é necessário configurar banco de dados, variáveis de ambiente ou funções server-side nesta versão.
+### D. Ligar o D1
+
+1. No painel, abra **Storage & databases → D1** e confirme o nome do banco.
+2. No projeto Pages, em **Settings → Bindings**, adicione o D1 com o nome da variável **`DB`**. A função só enxerga esse nome.
+3. Na sua máquina, com o Wrangler autenticado (`npx wrangler login`), aplique as tabelas no banco `DB`:
+
+```bash
+npx wrangler d1 execute DB --remote --file=./migrations/0001_init.sql
+```
+
+O comando `npm run db:migrate` faz a mesma coisa.
+
+4. Faça um novo deploy. As rotas em `functions/api` passam a responder em `/api/state`, `/api/users`, `/api/workouts`, `/api/exercises` e `/api/sessions`.
+
+Não há login. Quem alcançar o site consegue ler e alterar os perfis desse banco.
 
 ### D. Atualizar o site depois de mudar o código
 
@@ -99,21 +113,17 @@ O Cloudflare Pages detecta o novo commit, executa `npm run build` e publica a ve
 
 ## 4. Limitações importantes desta versão
 
-- Não há login real: a escolha de perfil é apenas uma seleção local.
-- Os dados ficam no navegador/dispositivo em que foram cadastrados.
-- Limpar os dados do navegador pode apagar os registros.
-- Não existe sincronização entre usuários ou dispositivos.
+- Não há login real: a escolha de perfil só escolhe um registro do banco.
+- Qualquer pessoa com o endereço do site pode ler e gravar nesses perfis.
 - O histórico guarda uma cópia dos dados registrados na sessão, portanto alterações futuras no treino não reescrevem sessões antigas.
-- Esta versão usa dados demonstrativos para iniciar a experiência.
-
-## 5. Próxima etapa: conectar o Supabase
-
-Quando o protótipo estiver aprovado, a evolução natural é criar tabelas para `profiles`, `workouts`, `exercises`, `workout_sessions` e `session_exercises`, configurar autenticação e substituir a camada de `localStorage` por chamadas ao Supabase. A interface pode ser mantida praticamente igual.
+- O banco começa vazio. Os perfis de demonstração (Alex e Marina) não são mais criados automaticamente.
 
 ## Comandos úteis
 
 ```bash
-npm run dev      # servidor local de desenvolvimento
-npm run build    # verifica tipos e gera a versão de produção em dist/
-npm run preview  # testa localmente a versão de produção
+npm run dev        # só a interface; /api não responde
+npm run dev:cf     # interface + Pages Functions, com o binding do wrangler.toml
+npm run db:migrate # cria as tabelas no D1 remoto chamado DB
+npm run build      # verifica tipos e gera a versão de produção em dist/
+npm run preview    # testa localmente a versão de produção, sem a API
 ```

@@ -1,0 +1,14 @@
+name = "gym-track"
+compatibility_date = "2026-01-01"
+pages_build_output_dir = "./dist"
+
+# Cole o UUID do seu D1 e descomente o bloco abaixo.
+# Painel: Storage & databases → D1 → o banco → Database ID.
+# O binding precisa se chamar DB: é esse nome que a Pages Function lê.
+# Se o banco já está ligado ao projeto Pages no painel com o nome DB,
+# pode deixar este bloco comentado para não substituir essa ligação.
+#
+# [[d1_databases]]
+# binding = "DB"
+# database_name = "gym-track"
+# database_id = "00000000-0000-0000-0000-000000000000"

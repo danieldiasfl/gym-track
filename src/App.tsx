@@ -1,81 +1,24 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity, ArrowLeft, ArrowRight, CalendarDays, Check, ChevronDown,
   CircleHelp, Clock3, Dumbbell, Ellipsis, History, House, LogOut,
   Menu, MoreHorizontal, Pencil, Plus, Search, Settings2, Sparkles,
   Target, Trash2, TrendingUp, UserRound, Users, X, Zap
 } from "lucide-react";
+import { api } from "./api";
+import type { Difficulty, Exercise, Session, Store, User, Workout } from "./types";
 
-type Difficulty = 1 | 2 | 3 | 4 | 5;
-type Exercise = { id: string; name: string; reps: string; load: number; notes: string; difficulty: Difficulty };
-type Workout = { id: string; name: string; description: string; color: string; exercises: Exercise[]; createdAt: string };
-type User = { id: string; name: string; initials: string; workouts: Workout[] };
-type HistoryExercise = { exerciseId: string; name: string; plannedReps: string; reps: string; load: number; notes: string };
-type Session = { id: string; userId: string; workoutId: string; workoutName: string; date: string; duration: number; exercises: HistoryExercise[] };
-type Store = { users: User[]; sessions: Session[] };
-
-const uid = () => Math.random().toString(36).slice(2, 10);
 const today = () => new Date().toISOString().slice(0, 10);
-const sample: Store = {
-  users: [
-    {
-      id: "u1", name: "Alex", initials: "AL",
-      workouts: [
-        { id: "w1", name: "Treino A", description: "Peito, ombro e tríceps", color: "violet", createdAt: today(), exercises: [
-          { id: "e1", name: "Supino reto com barra", reps: "3 × 10", load: 40, notes: "Controlar a descida", difficulty: 3 },
-          { id: "e2", name: "Supino inclinado com halteres", reps: "3 × 12", load: 16, notes: "", difficulty: 4 },
-          { id: "e3", name: "Elevação lateral", reps: "3 × 15", load: 8, notes: "Sem embalo", difficulty: 3 },
-          { id: "e4", name: "Tríceps corda", reps: "3 × 12", load: 25, notes: "", difficulty: 2 }
-        ]},
-        { id: "w2", name: "Treino B", description: "Costas, bíceps e abdômen", color: "blue", createdAt: today(), exercises: [
-          { id: "e5", name: "Puxada frontal", reps: "3 × 10", load: 45, notes: "", difficulty: 3 },
-          { id: "e6", name: "Remada baixa", reps: "3 × 12", load: 35, notes: "Pausar na contração", difficulty: 4 },
-          { id: "e7", name: "Rosca direta", reps: "3 × 10", load: 15, notes: "", difficulty: 3 }
-        ]},
-        { id: "w3", name: "Treino C", description: "Pernas e panturrilha", color: "orange", createdAt: today(), exercises: [
-          { id: "e8", name: "Agachamento livre", reps: "3 × 10", load: 50, notes: "Amplitude confortável", difficulty: 4 },
-          { id: "e9", name: "Leg press", reps: "3 × 12", load: 120, notes: "", difficulty: 3 },
-          { id: "e10", name: "Mesa flexora", reps: "3 × 12", load: 30, notes: "", difficulty: 3 },
-          { id: "e11", name: "Panturrilha em pé", reps: "3 × 15", load: 25, notes: "", difficulty: 2 }
-        ]}
-      ]
-    },
-    { id: "u2", name: "Marina", initials: "MA", workouts: [
-      { id: "w4", name: "Full body", description: "Corpo inteiro", color: "green", createdAt: today(), exercises: [
-        { id: "e12", name: "Agachamento goblet", reps: "3 × 12", load: 12, notes: "", difficulty: 3 },
-        { id: "e13", name: "Remada unilateral", reps: "3 × 10", load: 10, notes: "", difficulty: 3 }
-      ]}
-    ]}
-  ],
-  sessions: [
-    { id: "s1", userId: "u1", workoutId: "w1", workoutName: "Treino A", date: "2026-11-12", duration: 52, exercises: [
-      { exerciseId: "e1", name: "Supino reto com barra", plannedReps: "3 × 10", reps: "10 / 10 / 9", load: 42, notes: "" },
-      { exerciseId: "e2", name: "Supino inclinado com halteres", plannedReps: "3 × 12", reps: "12 / 12 / 12", load: 16, notes: "" },
-      { exerciseId: "e3", name: "Elevação lateral", plannedReps: "3 × 15", reps: "15 / 15 / 13", load: 8, notes: "" },
-      { exerciseId: "e4", name: "Tríceps corda", plannedReps: "3 × 12", reps: "12 / 12 / 12", load: 27.5, notes: "" }
-    ]},
-    { id: "s2", userId: "u1", workoutId: "w2", workoutName: "Treino B", date: "2026-11-10", duration: 48, exercises: [
-      { exerciseId: "e5", name: "Puxada frontal", plannedReps: "3 × 10", reps: "10 / 10 / 10", load: 45, notes: "" },
-      { exerciseId: "e6", name: "Remada baixa", plannedReps: "3 × 12", reps: "12 / 12 / 12", load: 35, notes: "" }
-    ]},
-    { id: "s3", userId: "u1", workoutId: "w1", workoutName: "Treino A", date: "2026-11-07", duration: 55, exercises: [
-      { exerciseId: "e1", name: "Supino reto com barra", plannedReps: "3 × 10", reps: "10 / 9 / 8", load: 40, notes: "" },
-      { exerciseId: "e2", name: "Supino inclinado com halteres", plannedReps: "3 × 12", reps: "12 / 11 / 10", load: 14, notes: "" }
-    ]}
-  ]
-};
+const initialsOf = (name: string) => name.trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
 
 const difficultyLabels = ["Muito fácil", "Fácil", "Moderado", "Difícil", "Muito difícil"];
 const colors = ["violet", "blue", "green", "orange", "pink"];
-const readStore = (): Store => {
-  try { const raw = localStorage.getItem("fittrack-data"); if (raw) return JSON.parse(raw) as Store; } catch {}
-  return sample;
-};
 const fmtDate = (date: string) => new Date(date + "T12:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" });
 const cx = (...v: (string | false | undefined)[]) => v.filter(Boolean).join(" ");
 
 export default function App() {
-  const [store, setStore] = useState<Store>(readStore);
+  const [store, setStore] = useState<Store | null>(null);
+  const [loadError, setLoadError] = useState("");
   const [userId, setUserId] = useState<string | null>(null);
   const [page, setPage] = useState<"home" | "history" | "workout" | "run">("home");
   const [selectedWorkoutId, setSelectedWorkoutId] = useState<string | null>(null);
@@ -91,52 +34,87 @@ export default function App() {
   const [runValues, setRunValues] = useState<Record<string, { reps: string; load: string; notes: string }>>({});
   const [runStarted, setRunStarted] = useState<number | null>(null);
   const [sessionDetail, setSessionDetail] = useState<Session | null>(null);
+  const savingRef = useRef(false);
 
-  useEffect(() => { localStorage.setItem("fittrack-data", JSON.stringify(store)); }, [store]);
+  const load = () => {
+    setLoadError("");
+    api.getState().then(setStore).catch((error: unknown) => {
+      setLoadError(error instanceof Error ? error.message : "Não foi possível carregar os treinos.");
+    });
+  };
+  useEffect(() => { load(); }, []);
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(""), 2600); return () => clearTimeout(t); }, [toast]);
 
-  const user = store.users.find(u => u.id === userId) ?? null;
+  const user = store?.users.find(u => u.id === userId) ?? null;
   const workout = user?.workouts.find(w => w.id === selectedWorkoutId) ?? null;
-  const userSessions = useMemo(() => store.sessions.filter(s => s.userId === user?.id).sort((a,b) => b.date.localeCompare(a.date)), [store.sessions, user]);
+  const userSessions = useMemo(() => (store?.sessions ?? []).filter(s => s.userId === user?.id).sort((a,b) => b.date.localeCompare(a.date)), [store, user]);
   const totalSessions = userSessions.length;
   const totalExercises = user?.workouts.reduce((n,w) => n + w.exercises.length, 0) ?? 0;
   const lastSession = userSessions[0];
 
   const updateUser = (fn: (u: User) => User) => {
     if (!user) return;
-    setStore(s => ({ ...s, users: s.users.map(u => u.id === user.id ? fn(u) : u) }));
+    setStore(s => s ? ({ ...s, users: s.users.map(u => u.id === user.id ? fn(u) : u) }) : s);
   };
   const notify = (message: string) => setToast(message);
+  const run = async (fn: () => Promise<void>) => {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    try { await fn(); }
+    catch (error) { notify(error instanceof Error ? error.message : "Não foi possível salvar. Tente novamente."); }
+    finally { savingRef.current = false; }
+  };
   const openWorkout = (w: Workout) => { setSelectedWorkoutId(w.id); setPage("workout"); };
   const newWorkout = () => { setEditingWorkout(null); setShowWorkoutModal(true); };
   const saveWorkout = (name: string, description: string, color: string) => {
     if (!user) return;
-    if (editingWorkout) {
-      updateUser(u => ({ ...u, workouts: u.workouts.map(w => w.id === editingWorkout.id ? { ...w, name, description, color } : w) }));
-      notify("Treino atualizado.");
-    } else {
-      const w: Workout = { id: uid(), name, description, color, exercises: [], createdAt: today() };
-      updateUser(u => ({ ...u, workouts: [...u.workouts, w] }));
-      setSelectedWorkoutId(w.id); setPage("workout"); notify("Treino criado.");
-    }
-    setShowWorkoutModal(false);
+    void run(async () => {
+      if (editingWorkout) {
+        await api.updateWorkout(editingWorkout.id, { name, description, color });
+        updateUser(u => ({ ...u, workouts: u.workouts.map(w => w.id === editingWorkout.id ? { ...w, name, description, color } : w) }));
+        notify("Treino atualizado.");
+      } else {
+        const w: Workout = { id: crypto.randomUUID(), name, description, color, exercises: [], createdAt: today() };
+        await api.createWorkout({ id: w.id, userId: user.id, name, description, color, createdAt: w.createdAt });
+        updateUser(u => ({ ...u, workouts: [...u.workouts, w] }));
+        setSelectedWorkoutId(w.id); setPage("workout"); notify("Treino criado.");
+      }
+      setShowWorkoutModal(false);
+    });
   };
   const deleteWorkout = (id: string) => {
     if (!user || !confirm("Excluir este treino? O histórico já registrado será mantido.")) return;
-    updateUser(u => ({ ...u, workouts: u.workouts.filter(w => w.id !== id) }));
-    setPage("home"); setSelectedWorkoutId(null); notify("Treino removido.");
+    void run(async () => {
+      await api.deleteWorkout(id);
+      updateUser(u => ({ ...u, workouts: u.workouts.filter(w => w.id !== id) }));
+      setPage("home"); setSelectedWorkoutId(null); notify("Treino removido.");
+    });
   };
   const saveExercise = (data: Omit<Exercise, "id">) => {
     if (!user || !workout) return;
-    updateUser(u => ({ ...u, workouts: u.workouts.map(w => w.id !== workout.id ? w : {
-      ...w, exercises: editingExercise ? w.exercises.map(e => e.id === editingExercise.id ? { ...data, id: e.id } : e) : [...w.exercises, { ...data, id: uid() }]
-    }) }));
-    setShowExerciseModal(false); notify(editingExercise ? "Exercício atualizado." : "Exercício adicionado.");
+    void run(async () => {
+      if (editingExercise) {
+        await api.updateExercise(editingExercise.id, data);
+        updateUser(u => ({ ...u, workouts: u.workouts.map(w => w.id !== workout.id ? w : {
+          ...w, exercises: w.exercises.map(e => e.id === editingExercise.id ? { ...data, id: e.id } : e)
+        }) }));
+        notify("Exercício atualizado.");
+      } else {
+        const exercise: Exercise = { ...data, id: crypto.randomUUID() };
+        await api.createExercise({ ...exercise, workoutId: workout.id });
+        updateUser(u => ({ ...u, workouts: u.workouts.map(w => w.id !== workout.id ? w : { ...w, exercises: [...w.exercises, exercise] }) }));
+        notify("Exercício adicionado.");
+      }
+      setShowExerciseModal(false);
+    });
   };
   const deleteExercise = (id: string) => {
     if (!confirm("Remover este exercício do treino?")) return;
-    updateUser(u => ({ ...u, workouts: u.workouts.map(w => w.id !== selectedWorkoutId ? w : { ...w, exercises: w.exercises.filter(e => e.id !== id) }) }));
-    notify("Exercício removido.");
+    void run(async () => {
+      await api.deleteExercise(id);
+      updateUser(u => ({ ...u, workouts: u.workouts.map(w => w.id !== selectedWorkoutId ? w : { ...w, exercises: w.exercises.filter(e => e.id !== id) }) }));
+      notify("Exercício removido.");
+    });
   };
   const startRun = () => {
     if (!workout) return;
@@ -147,7 +125,7 @@ export default function App() {
   const finishRun = () => {
     if (!user || !workout) return;
     const session: Session = {
-      id: uid(), userId: user.id, workoutId: workout.id, workoutName: workout.name, date: sessionDate,
+      id: crypto.randomUUID(), userId: user.id, workoutId: workout.id, workoutName: workout.name, date: sessionDate,
       duration: runStarted ? Math.max(1, Math.round((Date.now() - runStarted) / 60000)) : 45,
       exercises: workout.exercises.map(e => ({
         exerciseId: e.id, name: e.name, plannedReps: e.reps,
@@ -155,13 +133,27 @@ export default function App() {
         notes: runValues[e.id]?.notes ?? ""
       }))
     };
-    setStore(s => ({ ...s, sessions: [session, ...s.sessions] }));
-    setPage("history"); setRunStarted(null); notify("Treino registrado no histórico!");
+    void run(async () => {
+      await api.createSession(session);
+      setStore(s => s ? ({ ...s, sessions: [session, ...s.sessions] }) : s);
+      setPage("history"); setRunStarted(null); notify("Treino registrado no histórico!");
+    });
   };
   const createUser = (name: string) => {
-    const u: User = { id: uid(), name, initials: name.trim().split(/\s+/).slice(0,2).map(x => x[0]).join("").toUpperCase(), workouts: [] };
-    setStore(s => ({ ...s, users: [...s.users, u] })); setUserId(u.id); setPage("home"); setShowUserModal(false); notify(`Bem-vindo(a), ${name}!`);
+    const u: User = { id: crypto.randomUUID(), name, initials: initialsOf(name), workouts: [] };
+    void run(async () => {
+      await api.createUser({ id: u.id, name: u.name });
+      setStore(s => s ? ({ ...s, users: [...s.users, u] }) : s);
+      setUserId(u.id); setPage("home"); setShowUserModal(false); notify(`Bem-vindo(a), ${name}!`);
+    });
   };
+
+  if (!store) {
+    return <div className="welcome-screen"><div className="welcome-glow" /><div className="welcome-wrap">
+      <Brand />
+      <div className="welcome-copy"><h1>{loadError ? "Não foi possível carregar." : "Carregando seus treinos."}</h1><p>{loadError || "Buscando o que já está salvo no banco."}</p>{loadError && <button className="primary-button" onClick={load}>Tentar de novo</button>}</div>
+    </div></div>;
+  }
 
   if (!userId || !user) {
     return <div className="welcome-screen"><div className="welcome-glow" /><div className="welcome-wrap">
@@ -176,13 +168,13 @@ export default function App() {
           <button className="user-card add-user-card" onClick={() => setShowUserModal(true)}><span className="add-avatar"><Plus size={24}/></span><span className="user-card-name">Novo perfil</span><span className="user-card-meta">Começar do zero</span><ArrowRight size={17} className="user-arrow"/></button>
         </div>
       </div>
-      <div className="welcome-foot"><span>FITTRACK <i>•</i> VERSÃO DEMO</span><span>Seus dados ficam neste navegador</span></div>
+      <div className="welcome-foot"><span>FITTRACK <i>•</i> 1.0</span><span>Seus treinos ficam salvos no banco</span></div>
     </div>{showUserModal && <UserModal onClose={() => setShowUserModal(false)} onSave={createUser}/ >}{toast && <Toast message={toast}/>}</div>;
   }
 
   const nav = <><button className={cx("nav-item", page === "home" && "active")} onClick={() => { setPage("home"); setMobileNav(false); }}><House size={18}/> Visão geral</button><button className={cx("nav-item", page === "history" && "active")} onClick={() => { setPage("history"); setMobileNav(false); }}><History size={18}/> Histórico</button></>;
   return <div className="app-shell">
-    <aside className={cx("sidebar", mobileNav && "sidebar-open")}><Brand/><div className="workspace-label">ESPAÇO DE TREINO</div><div className="side-user"><span className="avatar">{user.initials}</span><span><b>{user.name}</b><small>Perfil pessoal</small></span><button title="Trocar usuário" className="icon-button tiny" onClick={() => { setUserId(null); setPage("home"); }}><LogOut size={16}/></button></div><nav>{nav}</nav><div className="sidebar-bottom"><div className="tip-card"><div className="tip-icon"><Zap size={17}/></div><b>Pequenos passos.</b><p>A consistência é o que transforma esforço em resultado.</p></div><button className="nav-item muted" onClick={() => { setUserId(null); setPage("home"); }}><Users size={17}/> Trocar perfil</button><div className="side-footer">FITTRACK <span>•</span> DEMO 1.0</div></div></aside>
+    <aside className={cx("sidebar", mobileNav && "sidebar-open")}><Brand/><div className="workspace-label">ESPAÇO DE TREINO</div><div className="side-user"><span className="avatar">{user.initials}</span><span><b>{user.name}</b><small>Perfil pessoal</small></span><button title="Trocar usuário" className="icon-button tiny" onClick={() => { setUserId(null); setPage("home"); }}><LogOut size={16}/></button></div><nav>{nav}</nav><div className="sidebar-bottom"><div className="tip-card"><div className="tip-icon"><Zap size={17}/></div><b>Pequenos passos.</b><p>A consistência é o que transforma esforço em resultado.</p></div><button className="nav-item muted" onClick={() => { setUserId(null); setPage("home"); }}><Users size={17}/> Trocar perfil</button><div className="side-footer">FITTRACK <span>•</span> 1.0</div></div></aside>
     <main className="main-area">
       <header className="topbar"><button className="icon-button mobile-menu" onClick={() => setMobileNav(!mobileNav)}><Menu size={20}/></button><div className="breadcrumb">Workspace <span>/</span> <b>{page === "history" ? "Histórico" : page === "workout" ? workout?.name : page === "run" ? "Registrar treino" : "Visão geral"}</b></div><div className="topbar-right"><span className="today-label"><CalendarDays size={15}/>{fmtDate(today())}</span><button className="avatar avatar-small" title={user.name} onClick={() => setUserId(null)}>{user.initials}</button></div></header>
       <div className="content">
