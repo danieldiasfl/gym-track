@@ -1,12 +1,19 @@
 {
-    "$schema": "./node_modules/wrangler/config-schema.json",
-    "name": "gym-track",
-    "main": "src/worker.ts",
-    "compatibility_date": "2026-11-14",
-    "assets": {
-      "directory": "./dist/",
-      "binding": "ASSETS",
-      "not_found_handling": "single-page-application",
-      "run_worker_first": ["/api/*"]
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "gym-track",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-11-14",
+  "assets": {
+    "directory": "./dist/",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "gym-track-db",
+      "database_id": "a1d0102a-b282-4bd8-8e44-ab4942d3274a"
     }
-  }
+  ]
+}
