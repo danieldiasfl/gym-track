@@ -1,0 +1,34 @@
+type Stmt={bind(...v:unknown[]):Stmt;all<T=Record<string,unknown>>():Promise<{results:T[]}>;first<T=Record<string,unknown>>():Promise<T|null>;run():Promise<unknown>};
+type DB={prepare(q:string):Stmt;batch(s:Stmt[]):Promise<unknown>};
+type Env={DB?:DB};
+class HttpError extends Error{status:number;constructor(status:number,msg:string){super(msg);this.status=status}}
+const json=(v:unknown,status=200)=>new Response(JSON.stringify(v),{status,headers:{'content-type':'application/json; charset=utf-8'}});
+const str=(v:unknown,max=280)=>typeof v==='string'?v.trim().slice(0,max):'';
+const id=(v:unknown)=>{const s=str(v,36);if(!/^[0-9a-f-]{36}$/i.test(s))throw new HttpError(400,'Identificador inválido.');return s};
+const name=(v:unknown,label:string,max=70)=>{const s=str(v,max);if(!s)throw new HttpError(400,`${label} obrigatório.`);return s};
+const initials=(s:string)=>s.trim().split(/\s+/).slice(0,2).map(x=>x[0]).join('').toUpperCase();
+async function body(r:Request){try{return await r.json() as Record<string,unknown>}catch{throw new HttpError(400,'JSON inválido.')}}
+async function state(db:DB){
+ const [us,ws,es,logs]=await Promise.all([
+ db.prepare('SELECT id,name,initials FROM users ORDER BY created_at').all<any>(),
+ db.prepare('SELECT id,user_id,name,description,color,position,created_at FROM workouts ORDER BY position,id').all<any>(),
+ db.prepare('SELECT id,workout_id,name,reps,load,notes,position FROM exercises ORDER BY position,id').all<any>(),
+ db.prepare(`SELECT l.*,e.name exercise_name,w.name workout_name FROM exercise_logs l JOIN exercises e ON e.id=l.exercise_id JOIN workouts w ON w.id=l.workout_id ORDER BY l.log_date DESC,l.updated_at DESC`).all<any>()
+ ]);
+ const exBy=new Map<string,any[]>();for(const e of es.results){const a=exBy.get(e.workout_id)||[];a.push({id:e.id,name:e.name,reps:e.reps,load:Number(e.load),notes:e.notes,position:e.position});exBy.set(e.workout_id,a)}
+ const wBy=new Map<string,any[]>();for(const w of ws.results){const a=wBy.get(w.user_id)||[];a.push({id:w.id,name:w.name,description:w.description,color:w.color,position:w.position,createdAt:w.created_at,exercises:exBy.get(w.id)||[]});wBy.set(w.user_id,a)}
+ return {users:us.results.map(u=>({...u,workouts:wBy.get(u.id)||[]})),logs:logs.results.map(l=>({id:l.id,userId:l.user_id,workoutId:l.workout_id,exerciseId:l.exercise_id,date:l.log_date,reps:l.reps,load:Number(l.load),effort:l.effort,notes:l.notes,exerciseName:l.exercise_name,workoutName:l.workout_name}))};
+}
+async function handle(r:Request,db:DB){const p=new URL(r.url).pathname.split('/').filter(Boolean).slice(1),[res,key]=p,m=r.method;
+ if(m==='GET'&&res==='state')return json(await state(db));
+ if(m==='POST'&&res==='users'){const b=await body(r),uid=id(b.id),n=name(b.name,'Nome',32);await db.prepare('INSERT INTO users(id,name,initials) VALUES(?,?,?)').bind(uid,n,initials(n)).run();return json({ok:true},201)}
+ if(m==='POST'&&res==='workouts'){const b=await body(r),wid=id(b.id),uid=id(b.userId),n=name(b.name,'Treino',40);const pos=await db.prepare('SELECT COALESCE(MAX(position),-1)+1 p FROM workouts WHERE user_id=?').bind(uid).first<any>();await db.prepare('INSERT INTO workouts(id,user_id,name,description,color,position,created_at) VALUES(?,?,?,?,?,?,?)').bind(wid,uid,n,str(b.description,80),str(b.color,20)||'violet',pos?.p??0,str(b.createdAt,10)).run();return json({ok:true},201)}
+ if(m==='PATCH'&&res==='workouts'&&key){const b=await body(r);await db.prepare('UPDATE workouts SET name=?,description=?,color=? WHERE id=?').bind(name(b.name,'Treino',40),str(b.description,80),str(b.color,20),id(key)).run();return json({ok:true})}
+ if(m==='DELETE'&&res==='workouts'&&key){await db.prepare('DELETE FROM workouts WHERE id=?').bind(id(key)).run();return json({ok:true})}
+ if(m==='POST'&&res==='exercises'){const b=await body(r),eid=id(b.id),wid=id(b.workoutId),n=name(b.name,'Exercício');const load=Number(b.load);if(!Number.isFinite(load)||load<0)throw new HttpError(400,'Carga inválida.');const pos=await db.prepare('SELECT COALESCE(MAX(position),-1)+1 p FROM exercises WHERE workout_id=?').bind(wid).first<any>();await db.prepare('INSERT INTO exercises(id,workout_id,name,reps,load,notes,position) VALUES(?,?,?,?,?,?,?)').bind(eid,wid,n,name(b.reps,'Repetições',40),load,str(b.notes),pos?.p??0).run();return json({ok:true},201)}
+ if(m==='PATCH'&&res==='exercises'&&key){const b=await body(r),load=Number(b.load);if(!Number.isFinite(load)||load<0)throw new HttpError(400,'Carga inválida.');await db.prepare('UPDATE exercises SET name=?,reps=?,load=?,notes=? WHERE id=?').bind(name(b.name,'Exercício'),name(b.reps,'Repetições',40),load,str(b.notes),id(key)).run();return json({ok:true})}
+ if(m==='DELETE'&&res==='exercises'&&key){await db.prepare('DELETE FROM exercises WHERE id=?').bind(id(key)).run();return json({ok:true})}
+ if(m==='POST'&&res==='reorder'){const b=await body(r);if(!Array.isArray(b.ids)||b.ids.length>100)throw new HttpError(400,'Lista de ordem inválida.');const ids=b.ids.map(id);const parent=id(b.parentId);if(b.kind==='workouts'){await db.batch(ids.map((v,i)=>db.prepare('UPDATE workouts SET position=? WHERE id=? AND user_id=?').bind(i,v,parent)))}else if(b.kind==='exercises'){await db.batch(ids.map((v,i)=>db.prepare('UPDATE exercises SET position=? WHERE id=? AND workout_id=?').bind(i,v,parent)))}else throw new HttpError(400,'Tipo de ordenação inválido.');return json({ok:true})}
+ if(m==='POST'&&res==='logs'){const b=await body(r),logId=id(b.id),uid=id(b.userId),wid=id(b.workoutId),eid=id(b.exerciseId),date=str(b.date,10),reps=name(b.reps,'Repetições',40),load=Number(b.load),effort=Number(b.effort);if(!/^\d{4}-\d{2}-\d{2}$/.test(date))throw new HttpError(400,'Data inválida.');if(!Number.isFinite(load)||load<0)throw new HttpError(400,'Carga inválida.');if(!Number.isInteger(effort)||effort<1||effort>5)throw new HttpError(400,'Esforço deve ser de 1 a 5.');await db.prepare(`INSERT INTO exercise_logs(id,user_id,workout_id,exercise_id,log_date,reps,load,effort,notes,updated_at) VALUES(?,?,?,?,?,?,?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now')) ON CONFLICT(user_id,exercise_id,log_date) DO UPDATE SET id=excluded.id,workout_id=excluded.workout_id,reps=excluded.reps,load=excluded.load,effort=excluded.effort,notes=excluded.notes,updated_at=excluded.updated_at`).bind(logId,uid,wid,eid,date,reps,load,effort,str(b.notes)).run();return json({ok:true})}
+ throw new HttpError(404,'Rota não encontrada.');}
+export async function onRequest(ctx:{request:Request;env:Env}){if(!ctx.env.DB)return json({error:"Binding D1 'DB' não configurado."},500);try{return await handle(ctx.request,ctx.env.DB)}catch(e){return json({error:e instanceof Error?e.message:'Erro interno.'},e instanceof HttpError?e.status:500)}}

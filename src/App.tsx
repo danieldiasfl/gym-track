@@ -1,240 +1,45 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  Activity, ArrowLeft, ArrowRight, CalendarDays, Check, ChevronDown,
-  CircleHelp, Clock3, Dumbbell, Ellipsis, History, House, LogOut,
-  Menu, MoreHorizontal, Pencil, Plus, Search, Settings2, Sparkles,
-  Target, Trash2, TrendingUp, UserRound, Users, X, Zap
-} from "lucide-react";
-import { api } from "./api";
-import type { Difficulty, Exercise, Session, Store, User, Workout } from "./types";
-
-const today = () => new Date().toISOString().slice(0, 10);
-const initialsOf = (name: string) => name.trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
-
-const difficultyLabels = ["Muito fácil", "Fácil", "Moderado", "Difícil", "Muito difícil"];
-const colors = ["violet", "blue", "green", "orange", "pink"];
-const fmtDate = (date: string) => new Date(date + "T12:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" });
-const cx = (...v: (string | false | undefined)[]) => v.filter(Boolean).join(" ");
-
-export default function App() {
-  const [store, setStore] = useState<Store | null>(null);
-  const [loadError, setLoadError] = useState("");
-  const [userId, setUserId] = useState<string | null>(null);
-  const [page, setPage] = useState<"home" | "history" | "workout" | "run">("home");
-  const [selectedWorkoutId, setSelectedWorkoutId] = useState<string | null>(null);
-  const [showUserModal, setShowUserModal] = useState(false);
-  const [showWorkoutModal, setShowWorkoutModal] = useState(false);
-  const [showExerciseModal, setShowExerciseModal] = useState(false);
-  const [editingWorkout, setEditingWorkout] = useState<Workout | null>(null);
-  const [editingExercise, setEditingExercise] = useState<Exercise | null>(null);
-  const [search, setSearch] = useState("");
-  const [mobileNav, setMobileNav] = useState(false);
-  const [toast, setToast] = useState("");
-  const [sessionDate, setSessionDate] = useState(today());
-  const [runValues, setRunValues] = useState<Record<string, { reps: string; load: string; notes: string }>>({});
-  const [runStarted, setRunStarted] = useState<number | null>(null);
-  const [sessionDetail, setSessionDetail] = useState<Session | null>(null);
-  const savingRef = useRef(false);
-
-  const load = () => {
-    setLoadError("");
-    api.getState().then(setStore).catch((error: unknown) => {
-      setLoadError(error instanceof Error ? error.message : "Não foi possível carregar os treinos.");
-    });
-  };
-  useEffect(() => { load(); }, []);
-  useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(""), 2600); return () => clearTimeout(t); }, [toast]);
-
-  const user = store?.users.find(u => u.id === userId) ?? null;
-  const workout = user?.workouts.find(w => w.id === selectedWorkoutId) ?? null;
-  const userSessions = useMemo(() => (store?.sessions ?? []).filter(s => s.userId === user?.id).sort((a,b) => b.date.localeCompare(a.date)), [store, user]);
-  const totalSessions = userSessions.length;
-  const totalExercises = user?.workouts.reduce((n,w) => n + w.exercises.length, 0) ?? 0;
-  const lastSession = userSessions[0];
-
-  const updateUser = (fn: (u: User) => User) => {
-    if (!user) return;
-    setStore(s => s ? ({ ...s, users: s.users.map(u => u.id === user.id ? fn(u) : u) }) : s);
-  };
-  const notify = (message: string) => setToast(message);
-  const run = async (fn: () => Promise<void>) => {
-    if (savingRef.current) return;
-    savingRef.current = true;
-    try { await fn(); }
-    catch (error) { notify(error instanceof Error ? error.message : "Não foi possível salvar. Tente novamente."); }
-    finally { savingRef.current = false; }
-  };
-  const openWorkout = (w: Workout) => { setSelectedWorkoutId(w.id); setPage("workout"); };
-  const newWorkout = () => { setEditingWorkout(null); setShowWorkoutModal(true); };
-  const saveWorkout = (name: string, description: string, color: string) => {
-    if (!user) return;
-    void run(async () => {
-      if (editingWorkout) {
-        await api.updateWorkout(editingWorkout.id, { name, description, color });
-        updateUser(u => ({ ...u, workouts: u.workouts.map(w => w.id === editingWorkout.id ? { ...w, name, description, color } : w) }));
-        notify("Treino atualizado.");
-      } else {
-        const w: Workout = { id: crypto.randomUUID(), name, description, color, exercises: [], createdAt: today() };
-        await api.createWorkout({ id: w.id, userId: user.id, name, description, color, createdAt: w.createdAt });
-        updateUser(u => ({ ...u, workouts: [...u.workouts, w] }));
-        setSelectedWorkoutId(w.id); setPage("workout"); notify("Treino criado.");
-      }
-      setShowWorkoutModal(false);
-    });
-  };
-  const deleteWorkout = (id: string) => {
-    if (!user || !confirm("Excluir este treino? O histórico já registrado será mantido.")) return;
-    void run(async () => {
-      await api.deleteWorkout(id);
-      updateUser(u => ({ ...u, workouts: u.workouts.filter(w => w.id !== id) }));
-      setPage("home"); setSelectedWorkoutId(null); notify("Treino removido.");
-    });
-  };
-  const saveExercise = (data: Omit<Exercise, "id">) => {
-    if (!user || !workout) return;
-    void run(async () => {
-      if (editingExercise) {
-        await api.updateExercise(editingExercise.id, data);
-        updateUser(u => ({ ...u, workouts: u.workouts.map(w => w.id !== workout.id ? w : {
-          ...w, exercises: w.exercises.map(e => e.id === editingExercise.id ? { ...data, id: e.id } : e)
-        }) }));
-        notify("Exercício atualizado.");
-      } else {
-        const exercise: Exercise = { ...data, id: crypto.randomUUID() };
-        await api.createExercise({ ...exercise, workoutId: workout.id });
-        updateUser(u => ({ ...u, workouts: u.workouts.map(w => w.id !== workout.id ? w : { ...w, exercises: [...w.exercises, exercise] }) }));
-        notify("Exercício adicionado.");
-      }
-      setShowExerciseModal(false);
-    });
-  };
-  const deleteExercise = (id: string) => {
-    if (!confirm("Remover este exercício do treino?")) return;
-    void run(async () => {
-      await api.deleteExercise(id);
-      updateUser(u => ({ ...u, workouts: u.workouts.map(w => w.id !== selectedWorkoutId ? w : { ...w, exercises: w.exercises.filter(e => e.id !== id) }) }));
-      notify("Exercício removido.");
-    });
-  };
-  const startRun = () => {
-    if (!workout) return;
-    const initial: typeof runValues = {};
-    workout.exercises.forEach(e => initial[e.id] = { reps: e.reps, load: String(e.load), notes: "" });
-    setRunValues(initial); setSessionDate(today()); setRunStarted(Date.now()); setPage("run");
-  };
-  const finishRun = () => {
-    if (!user || !workout) return;
-    const session: Session = {
-      id: crypto.randomUUID(), userId: user.id, workoutId: workout.id, workoutName: workout.name, date: sessionDate,
-      duration: runStarted ? Math.max(1, Math.round((Date.now() - runStarted) / 60000)) : 45,
-      exercises: workout.exercises.map(e => ({
-        exerciseId: e.id, name: e.name, plannedReps: e.reps,
-        reps: runValues[e.id]?.reps ?? e.reps, load: Number(runValues[e.id]?.load ?? e.load),
-        notes: runValues[e.id]?.notes ?? ""
-      }))
-    };
-    void run(async () => {
-      await api.createSession(session);
-      setStore(s => s ? ({ ...s, sessions: [session, ...s.sessions] }) : s);
-      setPage("history"); setRunStarted(null); notify("Treino registrado no histórico!");
-    });
-  };
-  const createUser = (name: string) => {
-    const u: User = { id: crypto.randomUUID(), name, initials: initialsOf(name), workouts: [] };
-    void run(async () => {
-      await api.createUser({ id: u.id, name: u.name });
-      setStore(s => s ? ({ ...s, users: [...s.users, u] }) : s);
-      setUserId(u.id); setPage("home"); setShowUserModal(false); notify(`Bem-vindo(a), ${name}!`);
-    });
-  };
-
-  if (!store) {
-    return <div className="welcome-screen"><div className="welcome-glow" /><div className="welcome-wrap">
-      <Brand />
-      <div className="welcome-copy"><h1>{loadError ? "Não foi possível carregar." : "Carregando seus treinos."}</h1><p>{loadError || "Buscando o que já está salvo no banco."}</p>{loadError && <button className="primary-button" onClick={load}>Tentar de novo</button>}</div>
-    </div></div>;
-  }
-
-  if (!userId || !user) {
-    return <div className="welcome-screen"><div className="welcome-glow" /><div className="welcome-wrap">
-      <Brand />
-      <div className="welcome-copy"><span className="eyebrow"><Sparkles size={14}/> SEU ESPAÇO DE EVOLUÇÃO</span><h1>Treino feito.<br/><em>Evolução registrada.</em></h1><p>Organize sua rotina, acompanhe sua força e veja sua consistência ganhar forma.</p></div>
-      <div className="user-picker">
-        <div className="section-heading"><div><h2>Quem vai treinar?</h2><p>Escolha seu perfil para continuar</p></div><span className="count-pill">{store.users.length} perfis</span></div>
-        <div className="user-grid">
-          {store.users.map(u => <button className="user-card" key={u.id} onClick={() => { setUserId(u.id); setPage("home"); }}>
-            <span className="avatar avatar-large">{u.initials}</span><span className="user-card-name">{u.name}</span><span className="user-card-meta">{u.workouts.length} {u.workouts.length === 1 ? "treino" : "treinos"}</span><ArrowRight size={17} className="user-arrow"/>
-          </button>)}
-          <button className="user-card add-user-card" onClick={() => setShowUserModal(true)}><span className="add-avatar"><Plus size={24}/></span><span className="user-card-name">Novo perfil</span><span className="user-card-meta">Começar do zero</span><ArrowRight size={17} className="user-arrow"/></button>
-        </div>
-      </div>
-      <div className="welcome-foot"><span>FITTRACK <i>•</i> 1.0</span><span>Seus treinos ficam salvos no banco</span></div>
-    </div>{showUserModal && <UserModal onClose={() => setShowUserModal(false)} onSave={createUser}/ >}{toast && <Toast message={toast}/>}</div>;
-  }
-
-  const nav = <><button className={cx("nav-item", page === "home" && "active")} onClick={() => { setPage("home"); setMobileNav(false); }}><House size={18}/> Visão geral</button><button className={cx("nav-item", page === "history" && "active")} onClick={() => { setPage("history"); setMobileNav(false); }}><History size={18}/> Histórico</button></>;
-  return <div className="app-shell">
-    <aside className={cx("sidebar", mobileNav && "sidebar-open")}><Brand/><div className="workspace-label">ESPAÇO DE TREINO</div><div className="side-user"><span className="avatar">{user.initials}</span><span><b>{user.name}</b><small>Perfil pessoal</small></span><button title="Trocar usuário" className="icon-button tiny" onClick={() => { setUserId(null); setPage("home"); }}><LogOut size={16}/></button></div><nav>{nav}</nav><div className="sidebar-bottom"><div className="tip-card"><div className="tip-icon"><Zap size={17}/></div><b>Pequenos passos.</b><p>A consistência é o que transforma esforço em resultado.</p></div><button className="nav-item muted" onClick={() => { setUserId(null); setPage("home"); }}><Users size={17}/> Trocar perfil</button><div className="side-footer">FITTRACK <span>•</span> 1.0</div></div></aside>
-    <main className="main-area">
-      <header className="topbar"><button className="icon-button mobile-menu" onClick={() => setMobileNav(!mobileNav)}><Menu size={20}/></button><div className="breadcrumb">Workspace <span>/</span> <b>{page === "history" ? "Histórico" : page === "workout" ? workout?.name : page === "run" ? "Registrar treino" : "Visão geral"}</b></div><div className="topbar-right"><span className="today-label"><CalendarDays size={15}/>{fmtDate(today())}</span><button className="avatar avatar-small" title={user.name} onClick={() => setUserId(null)}>{user.initials}</button></div></header>
-      <div className="content">
-        {page === "home" && <><div className="page-intro"><div><span className="eyebrow">SEU PAINEL</span><h1>Bom treino, {user.name.split(" ")[0]}<span className="wave"> ✦</span></h1><p>Um passo de cada vez. Acompanhe sua rotina e continue evoluindo.</p></div><button className="primary-button" onClick={newWorkout}><Plus size={18}/> Criar treino</button></div>
-          <div className="stats-grid"><Stat icon={<Dumbbell/>} label="Treinos criados" value={String(user.workouts.length).padStart(2,"0")} detail="Na sua rotina" tone="lavender"/><Stat icon={<Activity/>} label="Exercícios" value={String(totalExercises).padStart(2,"0")} detail="Em todos os treinos" tone="mint"/><Stat icon={<Target/>} label="Sessões concluídas" value={String(totalSessions).padStart(2,"0")} detail="No histórico" tone="peach"/><Stat icon={<TrendingUp/>} label="Último treino" value={lastSession ? fmtDate(lastSession.date).split(" de ")[0] : "—"} detail={lastSession?.workoutName ?? "Comece hoje"} tone="sky"/></div>
-          <div className="section-heading workout-heading"><div><h2>Sua rotina</h2><p>Escolha um treino para ver os exercícios ou iniciar uma sessão.</p></div><span className="count-pill">{user.workouts.length} treinos</span></div>
-          {user.workouts.length === 0 ? <EmptyState icon={<Dumbbell/>} title="Sua rotina começa aqui" text="Crie seu primeiro treino e organize os exercícios que fazem parte dele." action="Criar primeiro treino" onAction={newWorkout}/> :
-          <div className="workout-grid">{user.workouts.map((w,i) => <article className="workout-card" key={w.id}><div className="workout-card-top"><span className={`workout-symbol ${w.color}`}><Dumbbell size={19}/></span><button className="icon-button" title="Editar treino" onClick={() => { setEditingWorkout(w); setShowWorkoutModal(true); }}><Pencil size={16}/></button></div><div className="workout-card-body"><span className="workout-index">TREINO {String(i+1).padStart(2,"0")}</span><h3>{w.name}</h3><p>{w.description || "Sem descrição"}</p><div className="workout-meta"><span><Dumbbell size={14}/>{w.exercises.length} exercícios</span><span><Clock3 size={14}/>{Math.max(20,w.exercises.length*12)} min</span></div></div><div className="workout-card-bottom"><button className="text-button" onClick={() => openWorkout(w)}>Ver detalhes <ArrowRight size={16}/></button><button className="icon-button danger-hover" title="Excluir treino" onClick={() => deleteWorkout(w.id)}><Trash2 size={16}/></button></div></article>)}</div>}
-          <div className="bottom-note"><div className="note-mark"><Sparkles size={17}/></div><div><b>Seu progresso é construído treino após treino.</b><p>Registre suas sessões para acompanhar sua evolução ao longo do tempo.</p></div><button className="text-button" onClick={() => setPage("history")}>Ver histórico <ArrowRight size={15}/></button></div>
-        </>}
-
-        {page === "workout" && workout && <><button className="back-link" onClick={() => setPage("home")}><ArrowLeft size={16}/> Voltar para meus treinos</button><div className="page-intro detail-intro"><div><span className="eyebrow">DETALHES DO TREINO</span><h1>{workout.name}</h1><p>{workout.description || "Organize os exercícios desta rotina."}</p></div><div className="intro-actions"><button className="secondary-button" onClick={() => { setEditingWorkout(workout); setShowWorkoutModal(true); }}><Pencil size={16}/> Editar</button><button className="primary-button" onClick={startRun} disabled={!workout.exercises.length}><Zap size={17}/> Iniciar treino</button></div></div><div className="detail-summary"><div><span>EXERCÍCIOS</span><b>{workout.exercises.length}</b></div><div><span>DURAÇÃO ESTIMADA</span><b>{Math.max(20,workout.exercises.length*12)} min</b></div><div><span>CRIADO EM</span><b>{fmtDate(workout.createdAt)}</b></div></div><div className="section-heading"><div><h2>Lista de exercícios</h2><p>Configure carga, repetições e orientações de cada exercício.</p></div><button className="primary-button" onClick={() => { setEditingExercise(null); setShowExerciseModal(true); }}><Plus size={17}/> Adicionar exercício</button></div>
-          {workout.exercises.length === 0 ? <EmptyState icon={<Activity/>} title="Nenhum exercício por aqui" text="Adicione os exercícios que fazem parte deste treino." action="Adicionar exercício" onAction={() => setShowExerciseModal(true)}/> :
-          <div className="exercise-list">{workout.exercises.map((e,i) => <article className="exercise-row" key={e.id}><div className="exercise-number">{String(i+1).padStart(2,"0")}</div><div className="exercise-main"><h3>{e.name}</h3><div className="exercise-tags"><span>{e.reps} reps</span><span>{e.load} kg</span><span className={`difficulty d${e.difficulty}`}>{difficultyLabels[e.difficulty-1]}</span></div>{e.notes && <p className="exercise-note">{e.notes}</p>}</div><div className="exercise-actions"><button className="icon-button" title="Editar exercício" onClick={() => { setEditingExercise(e); setShowExerciseModal(true); }}><Pencil size={16}/></button><button className="icon-button danger-hover" title="Remover exercício" onClick={() => deleteExercise(e.id)}><Trash2 size={16}/></button></div></article>)}</div>}
-          <div className="delete-workout-line"><button className="text-button danger-text" onClick={() => deleteWorkout(workout.id)}><Trash2 size={15}/> Excluir este treino</button></div>
-        </>}
-
-        {page === "run" && workout && <><button className="back-link" onClick={() => setPage("workout")}><ArrowLeft size={16}/> Voltar aos detalhes</button><div className="page-intro"><div><span className="eyebrow">SESSÃO DE TREINO</span><h1>Hora de executar.</h1><p>{workout.name} · Registre o que você realmente realizou.</p></div><div className="run-date"><label>Data da execução</label><input type="date" value={sessionDate} onChange={e => setSessionDate(e.target.value)}/></div></div><div className="run-callout"><Zap size={18}/><span>Os valores começam preenchidos com seu planejamento. Ajuste-os conforme o treino acontecer.</span></div><div className="run-list">{workout.exercises.map((e,i) => <div className="run-card" key={e.id}><div className="run-card-heading"><span className="exercise-number">{String(i+1).padStart(2,"0")}</span><div><h3>{e.name}</h3><small>Planejado: {e.reps} · {e.load} kg</small></div></div><div className="run-fields"><label>Repetições realizadas<input value={runValues[e.id]?.reps ?? e.reps} onChange={ev => setRunValues(v => ({...v,[e.id]:{...v[e.id],reps:ev.target.value}}))} placeholder="Ex.: 10 / 10 / 8"/></label><label>Carga (kg)<input type="number" min="0" step="0.5" value={runValues[e.id]?.load ?? e.load} onChange={ev => setRunValues(v => ({...v,[e.id]:{...v[e.id],load:ev.target.value}}))}/></label><label className="run-notes">Notas da sessão<input value={runValues[e.id]?.notes ?? ""} onChange={ev => setRunValues(v => ({...v,[e.id]:{...v[e.id],notes:ev.target.value}}))} placeholder="Como foi? Alguma observação?"/></label></div></div>)}</div><div className="run-footer"><span><Check size={16}/> Você pode revisar antes de salvar.</span><button className="primary-button" onClick={finishRun}><Check size={17}/> Finalizar e salvar sessão</button></div></>}
-
-        {page === "history" && <><div className="page-intro"><div><span className="eyebrow">CONSISTÊNCIA EM FOCO</span><h1>Seu histórico</h1><p>Cada sessão conta. Veja o que você já conquistou.</p></div><div className="history-total"><b>{totalSessions}</b><span>sessões registradas</span></div></div><div className="history-highlight"><div className="highlight-icon"><TrendingUp size={21}/></div><div><span>VOLUME DE REGISTROS</span><b>{userSessions.reduce((n,s) => n + s.exercises.length, 0)} exercícios realizados</b><small>Somando todas as sessões deste perfil</small></div></div><div className="section-heading"><div><h2>Sessões anteriores</h2><p>Abra uma sessão para ver os detalhes registrados.</p></div></div>
-          {userSessions.length === 0 ? <EmptyState icon={<History/>} title="Seu histórico está vazio" text="Depois de concluir seu primeiro treino, ele aparecerá aqui."/> :
-          <div className="history-list">{userSessions.map(s => <button className="history-card" key={s.id} onClick={() => setSessionDetail(s)}><div className="history-date"><b>{new Date(s.date+"T12:00:00").getDate()}</b><span>{new Date(s.date+"T12:00:00").toLocaleDateString("pt-BR",{month:"short"})}</span></div><div className="history-info"><h3>{s.workoutName}</h3><p>{s.exercises.length} exercícios <i>·</i> {s.duration} min</p><div className="history-exercise-preview">{s.exercises.slice(0,3).map(e => e.name).join(" · ")}{s.exercises.length > 3 ? " +" : ""}</div></div><div className="history-right"><span className="history-complete"><Check size={13}/> Concluído</span><ArrowRight size={18}/></div></button>)}</div>}
-        </>}
-      </div>
-    </main>
-    {mobileNav && <div className="mobile-scrim" onClick={() => setMobileNav(false)}/>}
-    {showUserModal && <UserModal onClose={() => setShowUserModal(false)} onSave={createUser}/>}
-    {showWorkoutModal && <WorkoutModal workout={editingWorkout} onClose={() => setShowWorkoutModal(false)} onSave={saveWorkout}/>}
-    {showExerciseModal && <ExerciseModal exercise={editingExercise} onClose={() => setShowExerciseModal(false)} onSave={saveExercise}/>}
-    {sessionDetail && <SessionModal session={sessionDetail} onClose={() => setSessionDetail(null)}/>}
-    {toast && <Toast message={toast}/>}
-  </div>;
+import {useEffect,useMemo,useState} from 'react';
+import {Activity,ArrowLeft,CalendarDays,Check,ChevronRight,Dumbbell,GripVertical,History,LogOut,Pencil,Plus,Trash2,Users,X} from 'lucide-react';
+import {api} from './api';
+import type {Difficulty,Exercise,ExerciseLog,Store,User,Workout} from './types';
+const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`};
+const labels=['Muito fácil','Fácil','Moderado','Difícil','Muito difícil'];
+const dateLabel=(s:string)=>new Date(s+'T12:00:00').toLocaleDateString('pt-BR',{day:'2-digit',month:'short',year:'numeric'});
+function Brand(){return <div className="brand"><span className="brand-mark"><Activity size={20}/></span><span>gym<span>track</span><small>YOUR TRAINING SPACE</small></span></div>}
+function App(){
+ const [data,setData]=useState<Store|null>(null),[error,setError]=useState(''),[uid,setUid]=useState(''),[wid,setWid]=useState(''),[toast,setToast]=useState('');
+ const [userModal,setUserModal]=useState(false),[workoutModal,setWorkoutModal]=useState(false),[exerciseModal,setExerciseModal]=useState(false),[record,setRecord]=useState<Exercise|null>(null),[history,setHistory]=useState<Exercise|null>(null);
+ const [editWorkout,setEditWorkout]=useState<Workout|null>(null),[editExercise,setEditExercise]=useState<Exercise|null>(null),[drag,setDrag]=useState<string>('');
+ const [form,setForm]=useState({reps:'',load:'',effort:3 as Difficulty,notes:''});
+ const refresh=()=>api.state().then(setData).catch(e=>setError(e.message));useEffect(()=>{refresh()},[]);
+ const user=data?.users.find(x=>x.id===uid);const workout=user?.workouts.find(x=>x.id===wid);
+ const todays=(data?.logs||[]).filter(l=>l.userId===uid&&l.date===today());
+ const notify=(s:string)=>{setToast(s);setTimeout(()=>setToast(''),2500)};
+ async function act(fn:()=>Promise<unknown>){try{await fn();await refresh()}catch(e){notify(e instanceof Error?e.message:'Falha ao salvar')}}
+ function reorder(kind:'workouts'|'exercises',items:{id:string}[],from:string,to:string,parent:string){const a=[...items],i=a.findIndex(x=>x.id===from),j=a.findIndex(x=>x.id===to);if(i<0||j<0||i===j)return;const [m]=a.splice(i,1);a.splice(j,0,m);setData(s=>s?({...s,users:s.users.map(u=>u.id!==uid?u:{...u,workouts:kind==='workouts'?a as Workout[]:u.workouts.map(w=>w.id!==parent?w:{...w,exercises:a as Exercise[]})})}):s);void act(()=>api.reorder(kind,parent,a.map(x=>x.id)))}
+ async function saveUser(name:string){const id=crypto.randomUUID();await act(()=>api.createUser({id,name}));setUid(id);setUserModal(false)}
+ async function saveWorkout(v:{name:string;description:string;color:string}){if(!user)return;const id=editWorkout?.id||crypto.randomUUID();await act(()=>editWorkout?api.updateWorkout(id,v):api.createWorkout({id,userId:user.id,...v,createdAt:today()}));setWorkoutModal(false);setEditWorkout(null);if(!editWorkout)setWid(id)}
+ async function saveExercise(v:{name:string;reps:string;load:number;notes:string}){if(!workout)return;const id=editExercise?.id||crypto.randomUUID();await act(()=>editExercise?api.updateExercise(id,v):api.createExercise({...v,id,workoutId:workout.id}));setExerciseModal(false);setEditExercise(null)}
+ function openRecord(e:Exercise){const old=todays.find(l=>l.exerciseId===e.id);setForm({reps:old?.reps??e.reps,load:String(old?.load??e.load),effort:old?.effort??3,notes:old?.notes??''});setRecord(e)}
+ async function saveRecord(){if(!user||!workout||!record)return;await act(()=>api.log({id:crypto.randomUUID(),userId:user.id,workoutId:workout.id,exerciseId:record.id,date:today(),reps:form.reps,load:Number(form.load),effort:form.effort,notes:form.notes}));setRecord(null);notify('Registro de hoje salvo.')}
+ const recent=(e:Exercise)=> (data?.logs||[]).filter(l=>l.userId===uid&&l.exerciseId===e.id).sort((a,b)=>b.date.localeCompare(a.date)||b.id.localeCompare(a.id)).slice(0,3);
+ if(!data)return <div className="app-shell"><div className="content"><Brand/><h2>{error||'Carregando Gym Track...'}</h2>{error&&<button onClick={refresh}>Tentar novamente</button>}</div></div>;
+ if(!user)return <div className="welcome-screen"><div className="welcome-wrap"><Brand/><h1>Treino feito.<br/><em>Evolução registrada.</em></h1><h2>Quem vai treinar?</h2><div className="user-grid">{data.users.map(u=><button className="user-card" key={u.id} onClick={()=>setUid(u.id)}><b>{u.name}</b><small>{u.workouts.length} treinos</small></button>)}<button className="user-card" onClick={()=>setUserModal(true)}><Plus/> Novo perfil</button></div></div>{userModal&&<NameModal title="Novo perfil" onClose={()=>setUserModal(false)} onSave={saveUser}/>}</div>;
+ return <div className="app-shell"><aside className="sidebar"><Brand/><div className="workspace-label">ESPAÇO DE TREINO</div><div className="side-user"><b>{user.name}</b><button className="icon-button" onClick={()=>setUid('')} title="Trocar perfil"><LogOut size={16}/></button></div><button className="nav-item active" onClick={()=>setWid('')}>Meus treinos</button><div className="side-footer">GYM TRACK</div></aside><main className="main-area"><header className="topbar"><div className="breadcrumb">Gym Track <span>/</span> <b>{workout?.name||'Meus treinos'}</b></div><span className="today-label"><CalendarDays size={15}/>{dateLabel(today())}</span></header><div className="content">
+ {!workout?<><div className="page-intro"><div><span className="eyebrow">SEU PAINEL</span><h1>Olá, {user.name.split(' ')[0]}</h1><p>Arraste os treinos para organizar sua rotina.</p></div><button className="primary-button" onClick={()=>{setEditWorkout(null);setWorkoutModal(true)}}><Plus size={17}/> Criar treino</button></div><div className="section-heading"><h2>Sua rotina</h2><span>{user.workouts.length} treinos</span></div>{user.workouts.length===0?<p>Crie seu primeiro treino.</p>:<div className="workout-grid">{user.workouts.map((w,i)=><article className="workout-card" key={w.id} draggable onDragStart={()=>setDrag(w.id)} onDragOver={e=>e.preventDefault()} onDrop={()=>{reorder('workouts',user.workouts,drag,w.id,user.id);setDrag('')}}><div className="workout-card-top"><GripVertical/><button className="icon-button" onClick={e=>{e.stopPropagation();setEditWorkout(w);setWorkoutModal(true)}}><Pencil size={16}/></button></div><button className="workout-open" onClick={()=>setWid(w.id)}><span className="workout-index">TREINO {String(i+1).padStart(2,'0')}</span><h3>{w.name}</h3><p>{w.description}</p><div className="workout-meta"><Dumbbell size={14}/>{w.exercises.length} exercícios</div><span className="text-button">Abrir treino <ChevronRight size={16}/></span></button><button className="icon-button danger-hover" onClick={()=>confirm('Excluir este treino?')&&act(()=>api.deleteWorkout(w.id))}><Trash2 size={16}/></button></article>)}</div>}</>:
+ <><button className="back-link" onClick={()=>setWid('')}><ArrowLeft size={16}/> Meus treinos</button><div className="page-intro"><div><span className="eyebrow">TREINO DO DIA</span><h1>{workout.name}</h1><p>{workout.description||'Toque em um exercício para registrar sua execução.'}</p></div><button className="primary-button" onClick={()=>{setEditExercise(null);setExerciseModal(true)}}><Plus size={17}/> Adicionar exercício</button></div><div className="section-heading"><div><h2>Exercícios</h2><p>Arraste para alterar a ordem. Toque no exercício para registrar.</p></div><span>{workout.exercises.length} exercícios</span></div>{workout.exercises.length===0?<p>Adicione o primeiro exercício.</p>:<div className="exercise-list">{workout.exercises.map((e,i)=>{const log=todays.find(l=>l.exerciseId===e.id);return <article className="exercise-row" key={e.id} draggable onDragStart={()=>setDrag(e.id)} onDragOver={ev=>ev.preventDefault()} onDrop={()=>{reorder('exercises',workout.exercises,drag,e.id,workout.id);setDrag('')}}><span className="exercise-number">{String(i+1).padStart(2,'0')}</span><button className="exercise-main exercise-click" onClick={()=>openRecord(e)}><h3>{e.name}</h3><div className="exercise-tags"><span>{e.reps}</span><span>{e.load} kg</span></div>{log?<p className="today-log"><Check size={14}/> Hoje: {log.load} kg · {log.reps} · esforço {log.effort}/5</p>:<small>Toque para registrar</small>}</button><div className="exercise-actions"><button className="icon-button" title="Últimas 3 execuções" onClick={()=>setHistory(e)}><History size={17}/></button><button className="icon-button" title="Editar" onClick={()=>{setEditExercise(e);setExerciseModal(true)}}><Pencil size={16}/></button><button className="icon-button danger-hover" title="Excluir" onClick={()=>confirm('Remover exercício?')&&act(()=>api.deleteExercise(e.id))}><Trash2 size={16}/></button></div></article>})}</div>}<div className="delete-workout-line"><button className="text-button" onClick={()=>{setEditWorkout(workout);setWorkoutModal(true)}}><Pencil size={15}/> Editar treino</button></div></>}
+ </div></main>
+ {workoutModal&&<WorkoutForm initial={editWorkout} onClose={()=>setWorkoutModal(false)} onSave={saveWorkout}/>}
+ {exerciseModal&&<ExerciseForm initial={editExercise} onClose={()=>setExerciseModal(false)} onSave={saveExercise}/>}
+ {record&&<RecordForm exercise={record} values={form} setValues={setForm} onClose={()=>setRecord(null)} onSave={saveRecord}/>}
+ {history&&<HistoryModal exercise={history} logs={recent(history)} onClose={()=>setHistory(null)}/>}
+ {toast&&<div className="toast">{toast}</div>}
+ </div>;
 }
-
-function Brand() { return <div className="brand"><span className="brand-mark"><Activity size={20}/></span><span>fit<span>track</span><small>YOUR TRAINING SPACE</small></span></div>; }
-function Stat({icon,label,value,detail,tone}:{icon:React.ReactNode;label:string;value:string;detail:string;tone:string}) { return <div className="stat-card"><div className={`stat-icon ${tone}`}>{icon}</div><div className="stat-label">{label}</div><div className="stat-value">{value}</div><div className="stat-detail">{detail}</div></div>; }
-function EmptyState({icon,title,text,action,onAction}:{icon:React.ReactNode;title:string;text:string;action?:string;onAction?:()=>void}) { return <div className="empty-state"><div className="empty-icon">{icon}</div><h3>{title}</h3><p>{text}</p>{action && onAction && <button className="primary-button" onClick={onAction}><Plus size={16}/>{action}</button>}</div>; }
-function Toast({message}:{message:string}) { return <div className="toast"><span><Check size={16}/></span>{message}</div>; }
-
-function ModalShell({title,subtitle,onClose,children,wide=false}:{title:string;subtitle:string;onClose:()=>void;children:React.ReactNode;wide?:boolean}) {
-  return <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}><div className={cx("modal",wide && "modal-wide")}><div className="modal-header"><div><h2>{title}</h2><p>{subtitle}</p></div><button className="icon-button" onClick={onClose}><X size={19}/></button></div>{children}</div></div>;
-}
-function UserModal({onClose,onSave}:{onClose:()=>void;onSave:(name:string)=>void}) {
-  const [name,setName] = useState("");
-  return <ModalShell title="Criar perfil" subtitle="Cada perfil tem seus próprios treinos e histórico." onClose={onClose}><form onSubmit={e => {e.preventDefault(); if(name.trim()) onSave(name.trim());}}><label className="form-label">Nome do usuário<input autoFocus value={name} onChange={e=>setName(e.target.value)} placeholder="Ex.: Alex" maxLength={32}/></label><div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Cancelar</button><button className="primary-button" disabled={!name.trim()}><Plus size={16}/> Criar perfil</button></div></form></ModalShell>;
-}
-function WorkoutModal({workout,onClose,onSave}:{workout:Workout|null;onClose:()=>void;onSave:(name:string,description:string,color:string)=>void}) {
-  const [name,setName] = useState(workout?.name ?? "");
-  const [description,setDescription] = useState(workout?.description ?? "");
-  const [color,setColor] = useState(workout?.color ?? "violet");
-  return <ModalShell title={workout ? "Editar treino" : "Novo treino"} subtitle="Dê um nome e uma identidade para esta rotina." onClose={onClose}><form onSubmit={e=>{e.preventDefault();if(name.trim())onSave(name.trim(),description.trim(),color);}}><label className="form-label">Nome do treino<input autoFocus value={name} onChange={e=>setName(e.target.value)} placeholder="Ex.: Treino A" maxLength={40}/></label><label className="form-label">Descrição <span className="optional">opcional</span><input value={description} onChange={e=>setDescription(e.target.value)} placeholder="Ex.: Peito, ombro e tríceps" maxLength={80}/></label><div className="form-label">Cor de identificação<div className="color-picker">{colors.map(c=><button type="button" key={c} className={cx("color-dot",c,color===c&&"selected")} onClick={()=>setColor(c)} aria-label={c}>{color===c&&<Check size={15}/>}</button>)}</div></div><div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Cancelar</button><button className="primary-button" disabled={!name.trim()}><Check size={16}/> Salvar treino</button></div></form></ModalShell>;
-}
-function ExerciseModal({exercise,onClose,onSave}:{exercise:Exercise|null;onClose:()=>void;onSave:(data:Omit<Exercise,"id">)=>void}) {
-  const [name,setName] = useState(exercise?.name ?? "");
-  const [reps,setReps] = useState(exercise?.reps ?? "3 × 12");
-  const [load,setLoad] = useState(String(exercise?.load ?? 0));
-  const [notes,setNotes] = useState(exercise?.notes ?? "");
-  const [difficulty,setDifficulty] = useState<Difficulty>(exercise?.difficulty ?? 3);
-  return <ModalShell title={exercise ? "Editar exercício" : "Adicionar exercício"} subtitle="Defina os parâmetros e as orientações." onClose={onClose} wide><form onSubmit={e=>{e.preventDefault();if(name.trim())onSave({name:name.trim(),reps:reps.trim(),load:Number(load)||0,notes:notes.trim(),difficulty});}}><label className="form-label">Exercício<input autoFocus value={name} onChange={e=>setName(e.target.value)} placeholder="Ex.: Supino reto com barra" maxLength={70}/></label><div className="form-grid"><label className="form-label">Séries × repetições<input value={reps} onChange={e=>setReps(e.target.value)} placeholder="Ex.: 3 × 12"/></label><label className="form-label">Carga inicial (kg)<input type="number" min="0" step="0.5" value={load} onChange={e=>setLoad(e.target.value)}/></label></div><div className="form-label">Dificuldade<div className="difficulty-picker">{difficultyLabels.map((label,i)=><button type="button" key={label} className={cx("difficulty-option",difficulty===i+1&&"selected",`d${i+1}`)} onClick={()=>setDifficulty((i+1) as Difficulty)}><span>{i+1}</span><small>{label}</small></button>)}</div></div><label className="form-label">Notas <span className="optional">opcional</span><textarea value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Técnica, amplitude, equipamento ou lembretes..." rows={3}/></label><div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Cancelar</button><button className="primary-button" disabled={!name.trim()||!reps.trim()}><Check size={16}/> Salvar exercício</button></div></form></ModalShell>;
-}
-function SessionModal({session,onClose}:{session:Session;onClose:()=>void}) {
-  return <ModalShell title={session.workoutName} subtitle={`Sessão realizada em ${fmtDate(session.date)} · ${session.duration} min`} onClose={onClose} wide><div className="session-detail-list">{session.exercises.map((e,i)=><div className="session-detail-row" key={e.exerciseId+i}><div><b>{e.name}</b><small>Planejado: {e.plannedReps}</small>{e.notes&&<small>{e.notes}</small>}</div><div><strong>{e.load} kg</strong><small>{e.reps} reps</small></div></div>)}</div><div className="modal-actions"><button className="primary-button" onClick={onClose}>Fechar</button></div></ModalShell>;
-}
+function Shell({title,onClose,children}:{title:string;onClose:()=>void;children:React.ReactNode}){return <div className="modal-backdrop"><div className="modal"><div className="modal-header"><h2>{title}</h2><button className="icon-button" onClick={onClose}><X/></button></div>{children}</div></div>}
+function NameModal({title,onClose,onSave}:{title:string;onClose:()=>void;onSave:(v:string)=>void}){const [v,s]=useState('');return <Shell title={title} onClose={onClose}><form onSubmit={e=>{e.preventDefault();if(v.trim())onSave(v.trim())}}><label className="form-label">Nome<input value={v} onChange={e=>s(e.target.value)}/></label><button className="primary-button">Salvar</button></form></Shell>}
+function WorkoutForm({initial,onClose,onSave}:{initial:Workout|null;onClose:()=>void;onSave:(v:{name:string;description:string;color:string})=>void}){const [name,sn]=useState(initial?.name||''),[description,sd]=useState(initial?.description||''),[color,sc]=useState(initial?.color||'violet');return <Shell title={initial?'Editar treino':'Criar treino'} onClose={onClose}><form onSubmit={e=>{e.preventDefault();onSave({name,description,color})}}><label className="form-label">Nome<input value={name} onChange={e=>sn(e.target.value)}/></label><label className="form-label">Descrição<input value={description} onChange={e=>sd(e.target.value)}/></label><label className="form-label">Cor<select value={color} onChange={e=>sc(e.target.value)}><option>violet</option><option>blue</option><option>green</option><option>orange</option><option>pink</option></select></label><button className="primary-button">Salvar</button></form></Shell>}
+function ExerciseForm({initial,onClose,onSave}:{initial:Exercise|null;onClose:()=>void;onSave:(v:{name:string;reps:string;load:number;notes:string})=>void}){const [name,sn]=useState(initial?.name||''),[reps,sr]=useState(initial?.reps||'3 × 12'),[load,sl]=useState(String(initial?.load||0)),[notes,st]=useState(initial?.notes||'');return <Shell title={initial?'Editar exercício':'Adicionar exercício'} onClose={onClose}><form onSubmit={e=>{e.preventDefault();onSave({name,reps,load:Number(load),notes})}}><label className="form-label">Exercício<input value={name} onChange={e=>sn(e.target.value)}/></label><label className="form-label">Séries × repetições<input value={reps} onChange={e=>sr(e.target.value)}/></label><label className="form-label">Carga planejada (kg)<input type="number" min="0" step="0.5" value={load} onChange={e=>sl(e.target.value)}/></label><label className="form-label">Notas<textarea value={notes} onChange={e=>st(e.target.value)}/></label><button className="primary-button">Salvar exercício</button></form></Shell>}
+function RecordForm({exercise,values,setValues,onClose,onSave}:{exercise:Exercise;values:{reps:string;load:string;effort:Difficulty;notes:string};setValues:(v:{reps:string;load:string;effort:Difficulty;notes:string})=>void;onClose:()=>void;onSave:()=>void}){return <Shell title={`Registrar ${exercise.name}`} onClose={onClose}><div className="record-form"><label className="form-label">Repetições realizadas<input value={values.reps} onChange={e=>setValues({...values,reps:e.target.value})}/></label><label className="form-label">Carga (kg)<input type="number" min="0" step="0.5" value={values.load} onChange={e=>setValues({...values,load:e.target.value})}/></label><label className="form-label">Esforço percebido<div className="difficulty-picker">{labels.map((l,i)=><button type="button" key={l} className={`difficulty-option d${i+1} ${values.effort===i+1?'selected':''}`} onClick={()=>setValues({...values,effort:(i+1) as Difficulty})}><span>{i+1}</span><small>{l}</small></button>)}</div></label><label className="form-label">Notas opcionais<textarea value={values.notes} onChange={e=>setValues({...values,notes:e.target.value})}/></label><button className="primary-button" onClick={onSave}>Salvar registro de hoje</button><small>Se registrar novamente hoje, o registro anterior deste exercício será substituído.</small></div></Shell>}
+function HistoryModal({exercise,logs,onClose}:{exercise:Exercise;logs:ExerciseLog[];onClose:()=>void}){return <Shell title={`Histórico · ${exercise.name}`} onClose={onClose}>{logs.length===0?<p>Nenhuma execução registrada.</p>:<div className="session-detail-list">{logs.map(l=><div className="session-detail-row" key={l.id}><div><b>{dateLabel(l.date)}</b><small>{l.reps}</small></div><div><strong>{l.load} kg</strong><small>Esforço: {l.effort}/5 · {labels[l.effort-1]}</small></div></div>)}</div>}</Shell>}
+export default App;

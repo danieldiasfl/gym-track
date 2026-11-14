@@ -1,62 +1,42 @@
--- FitTrack schema for Cloudflare D1.
--- Apply with: npx wrangler d1 execute DB --remote --file=./migrations/0001_init.sql
-
 PRAGMA foreign_keys = ON;
-
-CREATE TABLE IF NOT EXISTS users (
+CREATE TABLE users (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   initials TEXT NOT NULL,
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
-
-CREATE TABLE IF NOT EXISTS workouts (
+CREATE TABLE workouts (
   id TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   description TEXT NOT NULL DEFAULT '',
   color TEXT NOT NULL DEFAULT 'violet',
-  created_at TEXT NOT NULL,
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  position INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
 );
-
-CREATE TABLE IF NOT EXISTS exercises (
+CREATE TABLE exercises (
   id TEXT PRIMARY KEY,
-  workout_id TEXT NOT NULL,
+  workout_id TEXT NOT NULL REFERENCES workouts(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   reps TEXT NOT NULL,
   load REAL NOT NULL DEFAULT 0,
   notes TEXT NOT NULL DEFAULT '',
-  difficulty INTEGER NOT NULL DEFAULT 3,
-  position INTEGER NOT NULL DEFAULT 0,
-  FOREIGN KEY (workout_id) REFERENCES workouts(id) ON DELETE CASCADE
+  position INTEGER NOT NULL DEFAULT 0
 );
-
-CREATE TABLE IF NOT EXISTS sessions (
+CREATE TABLE exercise_logs (
   id TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL,
-  workout_id TEXT,
-  workout_name TEXT NOT NULL,
-  date TEXT NOT NULL,
-  duration INTEGER NOT NULL,
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS session_exercises (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  session_id TEXT NOT NULL,
-  exercise_id TEXT,
-  name TEXT NOT NULL,
-  planned_reps TEXT NOT NULL,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  workout_id TEXT NOT NULL REFERENCES workouts(id) ON DELETE CASCADE,
+  exercise_id TEXT NOT NULL REFERENCES exercises(id) ON DELETE CASCADE,
+  log_date TEXT NOT NULL,
   reps TEXT NOT NULL,
   load REAL NOT NULL DEFAULT 0,
+  effort INTEGER NOT NULL CHECK (effort BETWEEN 1 AND 5),
   notes TEXT NOT NULL DEFAULT '',
-  position INTEGER NOT NULL DEFAULT 0,
-  FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  UNIQUE(user_id, exercise_id, log_date)
 );
-
-CREATE INDEX IF NOT EXISTS idx_workouts_user ON workouts(user_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_exercises_workout ON exercises(workout_id, position);
-CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id, date);
-CREATE INDEX IF NOT EXISTS idx_session_exercises_session ON session_exercises(session_id, position);
+CREATE INDEX idx_workouts_user_position ON workouts(user_id, position);
+CREATE INDEX idx_exercises_workout_position ON exercises(workout_id, position);
+CREATE INDEX idx_logs_user_date ON exercise_logs(user_id, log_date DESC);
+CREATE INDEX idx_logs_exercise_date ON exercise_logs(exercise_id, log_date DESC);
