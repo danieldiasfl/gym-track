@@ -74,7 +74,7 @@ const readStore = (): Store => {
 const fmtDate = (date: string) => new Date(date + "T12:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" });
 const cx = (...v: (string | false | undefined)[]) => v.filter(Boolean).join(" ");
 
-function App() {
+export default function App() {
   const [store, setStore] = useState<Store>(readStore);
   const [userId, setUserId] = useState<string | null>(null);
   const [page, setPage] = useState<"home" | "history" | "workout" | "run">("home");
