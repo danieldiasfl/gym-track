@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:cf": "wrangler pages dev --command \"npm run dev\"",
+    "dev:cf": "wrangler dev",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "db:migrate": "wrangler d1 execute DB --remote --file=./migrations/0001_init.sql"

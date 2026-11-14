@@ -1,6 +1,6 @@
 # FitTrack — protótipo de acompanhamento de treinos
 
-Aplicação web responsiva para organizar treinos, exercícios e histórico. A interface fala com Pages Functions em `/api`, e essas funções leem e gravam no Cloudflare D1.
+Aplicação web responsiva para organizar treinos, exercícios e histórico. A interface React é servida como Static Assets por um Cloudflare Worker. O Worker encaminha as rotas `/api/*` para o handler de API, que lê e grava no Cloudflare D1.
 
 ## Requisitos
 
@@ -35,9 +35,9 @@ Para parar o servidor, volte ao terminal e pressione `Ctrl + C`.
 - Clique em **Iniciar treino**, ajuste os valores efetivamente realizados e finalize.
 - Abra **Histórico** para consultar as sessões salvas.
 
-Os dados vêm do D1. No `npm run dev` puro a API não existe; use `npm run dev:cf` para subir o Vite junto com as Pages Functions. Antes disso, aplique o schema e deixe o binding `DB` apontando para o seu banco (veja a seção 3).
+Os dados vêm do D1. No `npm run dev` puro a API não existe. Para testar o Worker localmente, gere primeiro a pasta `dist` com `npm run build` e depois execute `npm run dev:cf`. O binding `DB` deve apontar para o seu banco D1.
 
-## 3. Publicar gratuitamente no Cloudflare Pages
+## 3. Publicar gratuitamente no Cloudflare Workers
 
 A maneira mais simples é publicar conectando o projeto a um repositório GitHub. Assim, cada `git push` pode disparar uma nova publicação.
 
@@ -64,29 +64,26 @@ git push -u origin main
 
 Se o Git pedir autenticação, siga a janela de login do navegador. Caso `git` não seja reconhecido, instale-o em https://git-scm.com/downloads e reabra o terminal.
 
-### C. Criar o site no Cloudflare Pages
+### C. Criar o Worker que hospeda o site
 
 1. Acesse https://dash.cloudflare.com/ e crie uma conta gratuita.
 2. No painel, entre em **Workers & Pages**.
-3. Escolha **Create application** e depois **Pages** (a opção pode aparecer como **Import an existing Git repository**).
+3. Escolha **Create application** e depois **Workers** → **Import a repository** (ou conecte o repositório GitHub ao Worker existente `gym-track`).
 4. Conecte sua conta GitHub e autorize o acesso ao repositório `fittrack`.
 5. Selecione o repositório `fittrack`.
 6. Configure o build:
 
-   - **Project name:** `fittrack` (ou outro nome disponível)
-   - **Production branch:** `main`
-   - **Framework preset:** `Vite` (se não aparecer, escolha `None`)
    - **Build command:** `npm run build`
-   - **Build output directory:** `dist`
+   - **Deploy command:** `npx wrangler deploy`
    - **Root directory:** `/` ou deixe em branco
 
-7. Clique em **Save and Deploy**.
-8. Aguarde o build terminar. O Cloudflare mostrará um endereço semelhante a `https://fittrack.pages.dev`.
+7. O arquivo `wrangler.jsonc` define o Worker `gym-track`, os arquivos estáticos em `dist/` e o encaminhamento de `/api/*` para o código do Worker.
+8. Clique em **Save and Deploy**. O endereço será semelhante a `https://gym-track.<seu-subdominio>.workers.dev`.
 
 ### D. Ligar o D1
 
 1. No painel, abra **Storage & databases → D1** e confirme o nome do banco.
-2. No projeto Pages, em **Settings → Bindings**, adicione o D1 com o nome da variável **`DB`**. A função só enxerga esse nome.
+2. No Worker `gym-track`, abra **Settings → Bindings** e adicione um binding D1 com o nome da variável **`DB`**, selecionando o banco que será usado pelo FitTrack. O código da API procura exatamente esse nome.
 3. Na sua máquina, com o Wrangler autenticado (`npx wrangler login`), aplique as tabelas no banco `DB`:
 
 ```bash
@@ -95,7 +92,7 @@ npx wrangler d1 execute DB --remote --file=./migrations/0001_init.sql
 
 O comando `npm run db:migrate` faz a mesma coisa.
 
-4. Faça um novo deploy. As rotas em `functions/api` passam a responder em `/api/state`, `/api/users`, `/api/workouts`, `/api/exercises` e `/api/sessions`.
+4. Faça um novo deploy. O Worker encaminha `/api/state`, `/api/users`, `/api/workouts`, `/api/exercises` e `/api/sessions` para `functions/api/[[path]].ts`.
 
 Não há login. Quem alcançar o site consegue ler e alterar os perfis desse banco.
 
@@ -109,7 +106,7 @@ git commit -m "Describe your change"
 git push
 ```
 
-O Cloudflare Pages detecta o novo commit, executa `npm run build` e publica a versão atualizada automaticamente.
+O Cloudflare Workers Builds detecta o novo commit, executa `npm run build` e publica a versão atualizada automaticamente.
 
 ## 4. Limitações importantes desta versão
 
@@ -122,7 +119,7 @@ O Cloudflare Pages detecta o novo commit, executa `npm run build` e publica a ve
 
 ```bash
 npm run dev        # só a interface; /api não responde
-npm run dev:cf     # interface + Pages Functions, com o binding do wrangler.toml
+npm run dev:cf     # executa o Worker localmente com Wrangler
 npm run db:migrate # cria as tabelas no D1 remoto chamado DB
 npm run build      # verifica tipos e gera a versão de produção em dist/
 npm run preview    # testa localmente a versão de produção, sem a API

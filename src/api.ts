@@ -8,16 +8,60 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       ...(init?.headers ?? {}),
     },
   });
-  const data = await response.json().catch(() => ({}));
+
+  const contentType = response.headers.get("content-type") ?? "";
+  const data: unknown = await response.json().catch(() => null);
+
   if (!response.ok) {
-    const message = typeof data.error === "string" ? data.error : "Não foi possível falar com o banco.";
+    const message =
+      data && typeof data === "object" && "error" in data && typeof data.error === "string"
+        ? data.error
+        : `Falha na API (${response.status}).`;
     throw new Error(message);
   }
+
+  // Avoid treating an HTML fallback page as a successful API response.
+  if (!contentType.toLowerCase().includes("application/json") || data === null) {
+    throw new Error(`A rota ${path} não retornou JSON. Verifique o roteamento da API no Cloudflare Worker.`);
+  }
+
   return data as T;
 }
 
+async function getState(): Promise<Store> {
+  const state = await request<unknown>("/api/state");
+  if (!state || typeof state !== "object") {
+    throw new Error("O servidor retornou um estado inválido.");
+  }
+
+  const candidate = state as Partial<Store>;
+  if (!Array.isArray(candidate.users) || !Array.isArray(candidate.sessions)) {
+    throw new Error("A resposta da API não contém as listas de usuários e sessões. Confira o Worker e a rota /api/state.");
+  }
+
+  const users = candidate.users.map((user) => {
+    if (!user || typeof user !== "object" || !Array.isArray(user.workouts)) {
+      throw new Error("Um perfil retornado pelo banco está em formato inválido.");
+    }
+    return {
+      ...user,
+      workouts: user.workouts.map((workout) => ({
+        ...workout,
+        exercises: Array.isArray(workout.exercises) ? workout.exercises : [],
+      })),
+    };
+  });
+
+  const sessions = candidate.sessions.map((session) => ({
+    ...session,
+    exercises: Array.isArray(session.exercises) ? session.exercises : [],
+  }));
+
+  return { users, sessions };
+}
+
 export const api = {
-  getState: () => request<Store>("/api/state"),
+  getState,
   createUser: (user: { id: string; name: string }) =>
     request("/api/users", { method: "POST", body: JSON.stringify(user) }),
   createWorkout: (workout: {
